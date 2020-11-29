@@ -1,0 +1,656 @@
+---
+title: "Data Science Capstone Milestone Report"
+author: "Rupender Raj Surender Raj"
+date: "11/3/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_knit$set(verbose = TRUE)
+knitr::opts_chunk$set(fig.width=7, fig.height=3) 
+```
+
+# Synopsis
+Here i am performing exploratory data analysis for few text file using NLP and data mining with libraries like "tm", and "RWeka". From this analysis we can understanding the distribution of words and relationship between the word sand later can  used latter to develop next word predicting app. 
+
+## Setting a Seed
+To make sure this notebook is reproducible:
+```{r seed}
+#set seed
+set.seed(1000)
+```
+
+## Library's
+```{r library, message=FALSE,warning=FALSE}
+library(tm)
+library(RWeka)
+library(ggplot2)
+library(knitr)
+library(dplyr)
+library(plyr)
+library(data.table)
+```
+
+## Function's
+```{r function, message=FALSE,warning=FALSE}
+
+# words without contraction form
+word_contraction <- function(w){       
+                rows <- nrow(contr_wo_ls)
+                for(i in 1 : rows ){
+                 w <- gsub(contr_wo_ls[i,1], contr_wo_ls[i,2], w, perl=T)
+                }
+        return(w)
+}
+
+# function to determine file size
+Size_MB <- function(x){round(file.info(x)$size/1024^2)}
+
+# function to determine word count
+Word_Count <- function(x){sum(sapply(strsplit(x, " "), length))}
+
+# function to determine line count
+Line_Count <- function(x){length(x)}
+
+# function to Plot
+PT <- function(x, y, z, z1, z2 = 0){
+        gg <- ggplot(x, aes(File, x[,y], fill = File))+ geom_bar(stat =
+                "identity",width = 0.4)+ theme(legend.position="none")+ 
+                ggtitle(z1)+ xlab("Files")+ 
+                ylab(z)+ theme(plot.title = element_text(color="steelblue"))
+                if (z2 == 1){
+                        gg <- gg + facet_wrap(as.factor(x[,5]))
+                }
+        return(gg)
+}
+
+PT1 <- function(z, z1){
+        gg <- ggplot(head(z,20), aes(x = reorder(word,-freq), y = freq))+ geom_bar(stat =
+                "identity",width = 0.4,fill="steelblue")+ theme(legend.position="none")+ 
+                ggtitle(z1)+ xlab("Words")+ ylab("Frequency")+ 
+                theme(axis.text.x = element_text(angle = 90, hjust = 1),
+                      plot.title = element_text(color="steelblue"))
+        return(gg)
+}
+# function to crate a sample
+Text_Sample <- function(x,y){sample(x, length(x) * y)}
+
+# function to write to txt
+Text_Out <- function(x,y){writeLines(x, y)}
+
+# function to corpora file
+Text_corp <- function(x){VCorpus(VectorSource(x))}
+
+# Replacement function
+Repl_func <- content_transformer(function(x,pattern){return(gsub(pattern, "",x))})
+
+# function for Tokenization
+Text_t <- function(x){
+        Text_c <- tm_map(x, Repl_func, '“')
+        Text_c <- tm_map(Text_c, Repl_func, '”')
+        Text_c <- tm_map(Text_c, Repl_func, '–')
+        Text_c <- tm_map(Text_c, Repl_func, '— ')
+        Text_c <- tm_map(Text_c, Repl_func, "@[^\\s]+")
+        Text_c <- tm_map(Text_c, removePunctuation)
+        Text_c <- tm_map(Text_c, removeNumbers)
+        Text_c <- tm_map(Text_c, removeWords, "profanity_word")
+        Text_c <- tm_map(Text_c, content_transformer(tolower))
+        Text_c <- tm_map(Text_c, stripWhitespace)
+}
+
+# Function to write Tokenized Text
+Text_wt <- function (x,y) {
+        text_t <- data.frame(text=unlist(sapply(x, `[`, "content")),
+                             stringsAsFactors=F)
+write.csv(text_t,y, row.names=FALSE)
+}
+
+# Function to determine the frequency of Words
+
+Freq_fun <- function(tdm){ freq <- sort(rowSums(as.matrix(tdm),na.rm = TRUE),
+                                        decreasing = TRUE)
+        return(data.frame(word = names(freq), freq = freq))
+}
+
+## Using the functions described bellow, we generated bigrams, trigrams .. etc from each sample source of blogs, news and twitter
+
+unigram <- function(x) NGramTokenizer(x, Weka_control(min = 1, max = 1))
+bigram <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+trigram <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+quadgram <- function(x) NGramTokenizer(x, Weka_control(min = 4, max = 4))
+pentagram <- function(x) NGramTokenizer(x, Weka_control(min = 5, max = 5))
+hexagram <- function(x) NGramTokenizer(x, Weka_control(min = 6, max = 6))
+
+
+Wordcoverage <- function(x,wordcover){ 
+        nwords <- 0
+        coverage <- wordcover*sum(x$freq)
+        for (i in 1:nrow(x)) {
+                if (nwords >= coverage) {
+                        return (i)
+                        }
+                nwords<-nwords+x$freq[i]
+        }
+}
+```
+
+## Task 1 - Getting and cleaning the data
+
+### Loading and Reading Data
+```{r  Loading and Reading Data,warning=FALSE}
+# Working Directory 
+work_dir <- "F:/DS/ASS/Text_mining"
+
+# Input files
+in_dir ="F:/DS/ASS/Text_mining/Input/en_US"
+
+# Read each file in Input Folder
+file_list <- "File list"
+file_name <- dir(in_dir)
+        for (i in 1:3){
+        file_seq <- paste(in_dir,file_name[i],sep = "/")
+        con <- file(file_seq, "r")
+        file_temp <- readLines(con,encoding="UTF-8") 
+        file_name_temp1 <- unlist(strsplit(file_name[i], ".txt"))
+        file_name_temp1 <- strsplit(file_name_temp1, "\\.")[[1]]
+        file_name_temp1 <- unique(tolower(file_name_temp1))[2]
+        do.call("<-",list(file_name_temp1,file_temp))
+        file_list <- c(file_list,file_name_temp1)
+        close(con)
+        }
+
+Text_summary <- as.data.frame(file_list[2:4])
+Text_summary <- cbind(Text_summary,as.data.frame(Size_MB(c(paste(in_dir,file_name[1],
+                sep = "/"),paste(in_dir,file_name[2],sep = "/"),
+                paste(in_dir,file_name[3],sep = "/")))))
+Text_summary <- cbind(Text_summary,as.data.frame(c(Word_Count(blogs),
+                Word_Count(news),Word_Count(twitter))))
+Text_summary <- cbind(Text_summary,as.data.frame(c(Line_Count(blogs),
+                Line_Count(news),Line_Count(twitter))))
+File_type <- rep("Orginal file",nrow(Text_summary))
+Text_summary <- cbind(Text_summary,File_type)
+names(Text_summary) <- c("File","Size MB","Word Count","Line count", "File type")
+```
+
+```{r Text summary 1,echo=FALSE}
+kable(Text_summary,caption = "Text File Summary",align = "lccrr","pipe")
+PT(Text_summary, 2, "Size in Mb", "Summary of Size")
+PT(Text_summary, 3, "Word Count", "Summary of Word Count")
+PT(Text_summary, 4, "Line Count", "Summary of Line Count")
+```
+
+### 1.Sampling
+
+We have three different data files from sources folder. Due to limitations in processing power, a sample of the data is taken. A approx 1800000 consecutive words are considered from the given each data set.
+```{r Sampling}
+
+blogs_s <- Text_Sample(blogs,0.018) #0.025
+news_s <- Text_Sample(news,0.26) #0.35
+twitter_s <- Text_Sample(twitter,0.022) #0.03
+
+# words without contraction
+
+contr_wo_ls <- as.data.frame(read.csv("Contraction_en.csv",
+                        sep = ',',header = TRUE,))
+blogs_s <- word_contraction(blogs_s)
+news_s <- word_contraction(news_s)
+twitter_s <- word_contraction(twitter_s)
+rm(contr_wo_ls)
+
+Text_Out(blogs_s,"blogs_s.txt")
+Text_Out(news_s,"news_s.txt")
+Text_Out(twitter_s,"twitter_s.txt")
+
+Text_summary1 <- as.data.frame(file_list[2:4])
+Text_summary1 <- cbind(Text_summary1,as.data.frame(Size_MB(c(paste(work_dir,"blogs_s.txt", 
+                sep = "/"),paste(work_dir,"news_s.txt",sep = "/"),
+                paste(work_dir,"twitter_s.txt",sep = "/")))))
+Text_summary1 <- cbind(Text_summary1,as.data.frame(c(Word_Count(blogs_s),
+                Word_Count(news_s),Word_Count(twitter_s))))
+Text_summary1 <- cbind(Text_summary1,as.data.frame(c(Line_Count(blogs_s),
+                Line_Count(news_s),Line_Count(twitter_s))))
+File_type <- rep("Sample file",nrow(Text_summary1))
+Text_summary1 <- cbind(Text_summary1,File_type)
+names(Text_summary1) <- c("File","Size MB","Word Count","Line count", "File type")
+
+Text_summary <- rbind(Text_summary,Text_summary1)
+rm(Text_summary1)
+```
+
+```{r Text summary 2,echo=FALSE}
+kable(Text_summary,caption = "Text File Summary",align = "lccrr","pipe")
+PT(Text_summary, 2, "Size in Mb", "Summary of Size", 1)
+PT(Text_summary, 3, "Word Count", "Summary of Word Count", 1)
+PT(Text_summary, 4, "Line Count", "Summary of Line Count", 1)
+```
+From the figure it can be seen the sample data extracted from the original files have very similar in size and Total Word count. hence with sample data we could further clean and Tokenize the data for unnecessary arguments.
+
+### 2.Tokenization 
+
+Now we can token all words associated with text by creating a corpus and then  removing bad words, punctuation and numbers.
+For profanity filtering, we downloaded a “badwords” list (source: https://github.com/shutterstock/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/blob/master/en) and removed the words accordingly.
+
+```{r Tokenization }
+# Corpora file Creation
+blogs_s_c <- Text_corp(blogs_s)
+news_s_c <- Text_corp(news_s)
+twitter_s_c <- Text_corp(twitter_s)
+
+# Remove double forward and backward quotes
+
+profanity_word <- read.csv("profanity_words.csv")
+
+blogs_t <- Text_t(blogs_s_c)
+news_t <- Text_t(news_s_c)
+twitter_t <-Text_t(twitter_s_c)
+
+Text_wt(blogs_t,"blogs_t.txt")
+Text_wt(news_t,"news_t.txt")
+Text_wt(twitter_t,"twitter_t.txt")
+
+```
+
+### Task 1 - Exploratory Data Analysis
+
+To understanding the distribution of words and relationship between the words in the corpora, we will use TermDocumentMatrix
+
+```{r TDM}
+
+blogs_tdm <- TermDocumentMatrix(blogs_t)
+news_tdm <- TermDocumentMatrix(news_t)
+twitter_tdm <- TermDocumentMatrix(twitter_t)
+
+#  Word frequencies
+
+blogs_wf <- Freq_fun(removeSparseTerms(blogs_tdm, 0.999))
+news_wf <- Freq_fun(removeSparseTerms(news_tdm, 0.999))
+twitter_wf <- Freq_fun(removeSparseTerms(twitter_tdm, 0.999))
+
+```
+
+```{r word frequecy 1 ,echo=FALSE}
+kable(list(head(blogs_wf,20),head(news_wf,20),head(twitter_wf,20),
+           caption = "Word Frequency in Blogs,News and Twitter text File"),booktabs = TRUE, valign = 't',align = "lccrr","pipe")
+```
+
+From the Table 3 its clear that most frequent words are Stop words of English. let see what are the other words other than Stop words
+
+```{r word frequecy 2 words,,echo=FALSE}
+
+blogs_nsp <- tm_map(blogs_t,removeWords,stopwords("English"))
+blogs_nsp <- tm_map(blogs_nsp, stripWhitespace)
+news_nsp <- tm_map(news_t,removeWords,stopwords("English"))
+news_nsp <- tm_map(news_nsp, stripWhitespace)
+twitter_nsp <- tm_map(twitter_t,removeWords,stopwords("English"))
+twitter_nsp <- tm_map(twitter_nsp, stripWhitespace)
+
+blogs_tdm_nsp <- TermDocumentMatrix(blogs_nsp)
+news_tdm_nsp <- TermDocumentMatrix(news_nsp)
+twitter_tdm_nsp <- TermDocumentMatrix(twitter_nsp)
+
+# Non Stop word frequencies
+
+blogs_wf <- Freq_fun(removeSparseTerms(blogs_tdm_nsp, 0.999))
+news_wf <- Freq_fun(removeSparseTerms(news_tdm_nsp, 0.999))
+twitter_wf <- Freq_fun(removeSparseTerms(twitter_tdm_nsp, 0.999))
+```
+
+```{r plöt, echo=FALSE }
+
+PT1(blogs_wf,"Top 20 Non StopWords in Blogs Text File")
+PT1(news_wf,"Top 20 Non StopWords in news Text File")
+PT1(twitter_wf,"Top 20 Non StopWords in Twitter Text File")
+
+```
+The figure show the frequencies of words other than Stop words.
+
+
+# Understand frequencies of words and word pairs
+
+## Frequencies of 2-Grams 
+```{r 2- gram Analysis}
+# 2 - grams
+blogs_2gram <- Freq_fun(TermDocumentMatrix(blogs_t, 
+        control = list(tokenize = bigram, bounds = list(global = c(50, Inf)))))
+news_2gram <- Freq_fun(TermDocumentMatrix(news_t, 
+        control = list(tokenize = bigram, bounds = list(global = c(50, Inf)))))
+twitter_2gram <- Freq_fun(TermDocumentMatrix(twitter_t, 
+        control = list(tokenize = bigram, bounds = list(global = c(50, Inf)))))
+```
+
+## 2- Gram Words Frequency
+```{r plöt1, echo=FALSE }
+PT1(blogs_2gram,"Top 20 2 Gram Words in Blogs Text File")
+PT1(news_2gram,"Top 20 2 Gram Words in News Text File")
+PT1(twitter_2gram,"Top 20 2 Gram Words in twitter Text File")
+```
+
+## Frequencies of 3-Grams 
+```{r 3- gram Analysis}
+blogs_3gram <- Freq_fun(TermDocumentMatrix(blogs_t, 
+        control = list(tokenize = trigram, bounds = list(global = c(30, Inf)))))
+  news_3gram <- Freq_fun(TermDocumentMatrix(news_t, 
+        control = list(tokenize = trigram, bounds = list(global = c(30, Inf)))))
+twitter_3gram <- Freq_fun(TermDocumentMatrix(twitter_t, 
+        control = list(tokenize = trigram, bounds = list(global = c(30, Inf)))))
+```
+
+## 3- Gram Words Frequency
+```{r plöt2, echo=FALSE }
+PT1(blogs_3gram,"Top 20 3 Gram Words in Blogs Text File")
+PT1(news_3gram,"Top 20 3 Gram Words in News Text File")
+PT1(twitter_3gram,"Top 20 3 Gram Words in Twitter Text File")
+```
+
+## Unique Word Coverage
+
+Unique words needed in a frequency sorted dictionary to cover 50% of all word instances in the language?  and 90%?
+```{r Unique Word Coverage}
+# Merge the Text Files
+
+All_Text <- c(blogs_t,news_t,twitter_t)
+All_Text_tdm <- TermDocumentMatrix(All_Text)
+All_Text_1gram <- Freq_fun(removeSparseTerms(All_Text_tdm, 0.999))
+
+# 50% Word Coverage
+Wordcoverage(All_Text_1gram,0.5)
+
+# 50% Word Coverage
+Wordcoverage(All_Text_1gram,0.9)
+```
+Unsurprisingly, the number of words increases exponentially when we increase our desired percent coverage of the language. This is because the frequency of unique words appearing in the corpora also drop exponentially. Hence, for a higher word coverage of the language or dictionary, it will require an exponential increase in number words.
+
+## Foreign Language Evaluation
+The code developed in this exploratory analysis is not discriminating of languages. When it is necessary to evaluate words from foreign languages, one can make use of the “tm_map” function to “removeWords” based on a language dictionary. The difference in word count will provide insight into the number of words from that particular language in the corpora.
+
+## Increasing Coverage
+There are several ways that could be used to increase the coverage. One is to reduce the number of low-frequency unique words by stemming or by substitution using a thesaurus library. Additionally, increasing the coverage is possible via context-clustering - with the introduction of a context to the corpora, it will be possible to cluster certain word groups together. For example, if the snapshot of the twitter corpora is taken during a major sporting event, there are many terms, lingos and slangs that could be clustered within the context.
+
+
+# Task 3 - Modeling
+
+*  To Build model predicting the next word based on the previous 1, 2, or 3 words we can use N-gram models.
+
+*  To handle unseen n-grams in N-gram we can use Katz Backoff Mode.
+
+*  And finaly Markov chain is used to store the model effeciently.
+
+## Building N-gram Frequencies
+```{r N-grams }
+corpus_without_curse_words <- All_Text
+# N-grams of different sizes Function
+
+
+grams1 <- Freq_fun(TermDocumentMatrix(All_Text, 
+        control = list(tokenize = unigram, bounds = list(global = c(50, Inf)))))
+grams2 <- Freq_fun(TermDocumentMatrix(All_Text, 
+        control = list(tokenize = bigram, bounds = list(global = c(40, Inf)))))
+grams3 <- Freq_fun(TermDocumentMatrix(All_Text, 
+        control = list(tokenize = trigram, bounds = list(global = c(15, Inf)))))
+grams4 <- Freq_fun(TermDocumentMatrix(All_Text, 
+        control = list(tokenize = quadgram, bounds = list(global = c(5, Inf)))))
+grams5 <- Freq_fun(TermDocumentMatrix(All_Text, 
+        control = list(tokenize = pentagram, bounds = list(global = c(3, Inf)))))
+
+ngrams <- rbind(grams1,grams2,grams3,grams4,grams5) %>%
+        arrange((word))
+frequencies_dt <- ngrams
+colnames(frequencies_dt) <- c("ngram","frequency")
+
+```
+
+```{r Text summary 3,echo=FALSE}
+kable(sample_n(frequencies_dt, 12),caption = "N-gram Frequencies",row.names = FALSE,align = "lccrr","pipe")
+``` 
+The Table Show the 12 random N-grams and its frequencies.
+
+An history column is created in the table
+
+```{r history }
+# function to calculate words history
+extract_history <- function(ngram){
+    ifelse(length(ngram) > 1,
+           paste(ngram[1:(length(ngram)-1)], collapse = " "),
+           ""
+    )
+}
+
+extract_word <- function(ngram) paste(ngram[length(ngram)], collapse = " ")
+
+build_processed_ngram_frequencies <- function(frequencies_dt) {
+    data <- as.data.frame(frequencies_dt)
+    data$ngram <- strsplit(data$ngram, split = " |'")
+    data$ngram_length <- sapply(data$ngram, length)
+    data$history <- sapply(data$ngram, extract_history)
+    data$word <- sapply(data$ngram, extract_word)
+    data$ngram <- sapply(data$ngram, paste, collapse = " ")
+    data.table(data)
+}
+# Extract the history word
+ngram_frequencies_dt <- build_processed_ngram_frequencies(frequencies_dt)
+```
+
+```{r Text summary 4,echo=FALSE}
+kable(as.data.frame(ngram_frequencies_dt[ngram_length > 1, ][order(-frequency), ][1:50, ]),caption = "N-gram Frequencies with its word history",row.names = FALSE,align = "lccrr","pipe")
+```
+
+To computing probabilities for the model will require counts for histories as well, so let’s create a data table specifically for this purpose
+```{r history frequency}
+history_frequencies_dt <-
+    ngram_frequencies_dt[, c("history", "frequency")][, lapply(.SD, sum), by = list(history)]
+```
+
+```{r Text summary 5,echo=FALSE}
+kable(as.data.frame(history_frequencies_dt[order(-frequency), ][1:50]),caption = "Frequency of History Words",row.names = FALSE,align = "lccrr","pipe")
+```
+
+```{r freq_freq}
+frequencies_of_frequencies <- table(ngram_frequencies_dt$frequency)
+frequencies_of_frequencies
+
+```
+
+# Good-Turing discount Function
+```{r Good-Turing}
+
+frequency_of_frequency <- function(frequency, frequencies_of_frequencies)
+    try_default(frequencies_of_frequencies[[toString(frequency)]], 1, quiet = TRUE)
+
+discount <- function(count, frequencies_of_frequencies) {
+    good_turing_count <- (count + 1) *
+        frequency_of_frequency(count + 1, frequencies_of_frequencies) /
+        frequency_of_frequency(count, frequencies_of_frequencies)
+    computed_discount <- good_turing_count / count
+    ifelse(computed_discount < 1, computed_discount, 1)
+}
+```
+Testing Good- turing for 1 counts is `r discount(1, frequencies_of_frequencies)`
+
+# Katz’s probability calculation
+```{r Katz’s probability Function}
+count_ngram <- function(word_value, history_value, ngram_frequencies_dt) {
+    count <- ngram_frequencies_dt[word == word_value & history == history_value, ]$frequency
+    ifelse(length(count) > 0, count, 1)
+}
+
+count_history <- function(history_value, history_frequencies_dt) {
+    count <- history_frequencies_dt[history == history_value, ]$frequency
+    ifelse(length(count) > 0, count, 1)
+}
+
+```
+Count of word "the" after word "in" in  a sentence is `r count_ngram("the", "in", ngram_frequencies_dt)`
+
+
+Frequency of word "in" as precedence word is `r count_history("in", history_frequencies_dt)`
+
+```{r Back off}
+# Function to remove the first word in a sentences
+
+backoff_history <- function(history) {
+    history_words <- strsplit(history, split = " |'")
+    ifelse(
+        length(history_words[[1]]) > 1,
+        trimws(paste(backoff_history_words <- history_words[[1]][2:length(history_words[[1]])], collapse = " ")),
+        ""
+    )
+}
+```
+## Testing backoff_history Function
+In a sentences "bird is the word" the function will remove each word from left
+1 step ...1st word... `r backoff_history("bird is the word") `
+2 step ...2 words.... `r backoff_history("bird is the word") `
+
+```{r Katz’s Beta }
+# function to calculate Beta probability
+katz_beta <- function(history_value, k,
+                      ngram_frequencies_dt,
+                      history_frequencies_dt,
+                      frequencies_of_frequencies) {
+
+    counts <- ngram_frequencies_dt[history == history_value & frequency > k, ]$frequency
+    history_count <- count_history(history_value, history_frequencies_dt)
+    1 - ifelse(length(counts) > 0,
+               sum(
+                   sapply(counts,
+                          function(x) discount(x, frequencies_of_frequencies) * x / history_count
+                   )
+               ),
+               0
+    )
+}
+
+#memoized_katz_beta <- addMemoization(katz_beta)
+
+```
+Testing Katz's beta probability for the word "the" is `r katz_beta("the", 5,ngram_frequencies_dt, history_frequencies_dt,     frequencies_of_frequencies)`
+
+```{r Katz alpha}
+total_words <- sum(ngram_frequencies_dt[ngram_length == 1, ]$frequency)
+
+katz_alpha_summation <- function(history_value, k, 
+                                 ngram_frequencies_dt, 
+                                 history_frequencies_dt, 
+                                 frequencies_of_frequencies) {
+    words <- ngram_frequencies_dt[history == history_value & frequency <= k, ]$word
+    ifelse(length(words) > 0,
+           sum(
+               sapply(words,
+                      katz_probability,
+                      history = backoff_history(history_value),
+                      k = k,
+                      ngram_frequencies_dt = ngram_frequencies_dt,
+                      history_frequencies_dt = history_frequencies_dt,
+                      frequencies_of_frequencies = frequencies_of_frequencies
+               )
+           ),
+           0
+    )
+}
+
+#memoized_katz_alpha_summation <- addMemoization(katz_alpha_summation)
+
+katz_alpha <- function(history, k,
+                       ngram_frequencies_dt,
+                       history_frequencies_dt,
+                       frequencies_of_frequencies) {
+    
+    computed_katz_alpha_summation <- katz_alpha_summation(history,
+                          k, ngram_frequencies_dt,
+                          history_frequencies_dt,
+                          frequencies_of_frequencies)
+
+    computed_katz_beta <- katz_beta(history, k,
+                          ngram_frequencies_dt, 
+                          history_frequencies_dt,
+                          frequencies_of_frequencies)
+
+    computed_katz_alpha <- ifelse(computed_katz_alpha_summation !=0,                           computed_katz_beta / 
+                         computed_katz_alpha_summation, 1)
+    ifelse(computed_katz_alpha < 1, computed_katz_alpha, 1)
+}
+
+#memoized_katz_alpha <- addMemoization(katz_alpha)
+
+katz_probability <- function(word, history, k,
+                             ngram_frequencies_dt,
+                             history_frequencies_dt,
+                             frequencies_of_frequencies,
+                             verbose = FALSE) {
+    if(verbose) print(paste0("katz_probability(word: [", word, "], history: [",
+                             history, "])..."))
+
+    word_with_history <- trimws(paste(history, word))
+    count <- count_ngram(word, history, ngram_frequencies_dt)
+    
+    probability <- ifelse(history == "", discount(count,
+                                frequencies_of_frequencies) * count / 
+                                 total_words,
+        ifelse(count > k, discount(count, frequencies_of_frequencies) * count /           count_history(history, ngram_frequencies_dt), katz_alpha(history, k,
+         ngram_frequencies_dt, history_frequencies_dt, frequencies_of_frequencies) * katz_probability(word, backoff_history(history), k,
+                                    ngram_frequencies_dt,
+                                    history_frequencies_dt,
+                                    frequencies_of_frequencies,
+                                    verbose = verbose)
+        )
+    )
+
+    if(verbose) print(paste0("katz_probability(word: [", word, "], history: [", history, "]) = ", probability))
+    probability
+}
+```
+Testing Katz's alpha simulation probability for the word "the" is `r katz_alpha_summation("the", 5, ngram_frequencies_dt, history_frequencies_dt, frequencies_of_frequencies)`
+
+Testing Katz's alpha probability for the word "the" is `r katz_alpha("the", 5, ngram_frequencies_dt, history_frequencies_dt, frequencies_of_frequencies)`
+
+Testing Katz's probability for the word "did" before the word "i" is `r  katz_probability("i", "did", 5, ngram_frequencies_dt, history_frequencies_dt, frequencies_of_frequencies)`
+
+# Computing a Markov Chain Trainsition Matrix
+
+With Katz's alpha and Beta probability we can know store the Ngrams in more efficient way representing Markov Chain
+
+```{r Transition Matrix}
+create_transition_matrix <- function(k,
+                                     ngram_frequencies_dt,
+                                     history_frequencies_dt,
+                                     frequencies_of_frequencies,
+                                     min_count = 3, verbose = FALSE) {
+    
+    prediction_data <- ngram_frequencies_dt[ngram_length > 1 & frequency > min_count, ]
+    
+    histories <- unique(c("", prediction_data$history))
+    print(paste0("history size: ", length(histories)))
+    
+    words <- unique(prediction_data$word)
+    print(paste0("word size: ", length(words)))
+    
+    transition_matrix <- matrix(NA, length(histories), length(words))
+    rownames(transition_matrix) <- histories
+    colnames(transition_matrix) <- words
+    
+    percentage_complete <- 0
+    percentage_counter <- 0
+    for(i in 1:length(histories)){
+        for(j in 1:length(words)){
+            transition_matrix[i, j] <- katz_probability(words[[j]],
+                                                        histories[[i]],
+                                                        k,
+                                                        ngram_frequencies_dt,
+                                                        history_frequencies_dt,
+                                                        frequencies_of_frequencies,
+                                                        verbose = verbose)
+        }
+        percentage_complete <- round((i * length(words) + j + 1) / (length(histories) * length(words)) * 100)
+        if(percentage_complete > percentage_counter & percentage_complete < 100) { 
+            percentage_counter <- percentage_complete
+            print(paste0(percentage_counter, "% complete."))
+        }
+    }
+    print("complete.")
+    transition_matrix
+}
+```
